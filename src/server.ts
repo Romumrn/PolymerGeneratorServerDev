@@ -162,6 +162,7 @@ function parseError(result : string) {
 
                 const itp = result.split('STOP')[0]
 
+                //super stupid variable pour avoir un retour a la ligne
                 const stupid = '\r'
                 const topfilestr = `#include "${PATH + "/martini_v3.0.0.itp"}"${stupid}#include "polymere.itp" ${stupid}
                 [ system ]${stupid}

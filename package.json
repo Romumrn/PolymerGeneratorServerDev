@@ -13,6 +13,8 @@
   "license": "ISC",
   "dependencies": {
     "express": "^4.17.2",
+    "glob": "^7.2.0",
+    "itp-parser": "^2.1.2",
     "ms-jobmanager": "^2.3.3",
     "multer": "^1.4.4",
     "socket.io": "^2.3.0",
@@ -22,6 +24,7 @@
   "devDependencies": {
     "@types/body-parser": "^1.19.2",
     "@types/express": "^4.17.13",
+    "@types/glob": "^7.2.0",
     "nodemon": "^2.0.15",
     "ts-node": "^10.5.0",
     "tsc": "^2.0.4"
