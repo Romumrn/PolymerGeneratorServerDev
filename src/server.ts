@@ -21,6 +21,7 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 const PATH = "/data3/rmarin/projet_polyply"
+const PATHDATA = "/data3/rmarin/projet_polyply/PolymerGeneratorServerDev/data/"
 //Build a dictionnary with all molecule avaible and a dictionnary with linking rules
 
 const jobmanagerClient = new PromiseManager("localhost", 6001)
@@ -50,15 +51,101 @@ app.get("/api/data", (req, res) => {
                             testdico[forcefield] = [mol]
                         }
                     }
-
                 }
-
             }
             console.log("Sending forcefields and residues data")
             res.send(avaibleData);
         })
 
 
+});
+
+app.get("/api/databetter", async (req, res) => {
+    console.log("databetter")
+    let avaibleData: any = {}
+    //glob.sync(PATHDATA + ff + "/*.itp").join('')
+    let listfile = glob.sync(PATH + "/polyply_1.0-master/polyply/data/*/*.+(itp|ff)").map(f => { return f })
+
+    for (let file of listfile) {
+        let forcefield = file.split('/')[7]
+
+        const itp = await ItpFile.read(file);
+        for (let e of itp.getField('moleculetype')) {
+            if (!e.startsWith(';')) {
+                const mol = e.split(' ')[0]
+                if (Object.keys(avaibleData).includes(forcefield)) {
+                    avaibleData[forcefield].push(mol)
+                }
+                else {
+                    avaibleData[forcefield] = [mol]
+                }
+
+            }
+        }
+    }
+
+    for (let ff of Object.keys(avaibleData)) {
+        let list2 = glob.sync(PATHDATA + ff + "/*.itp").map(f => { return f })
+        for (let file of list2) {
+            let forcefield = file.split('/')[6]
+
+            const itp = await ItpFile.read(file);
+            for (let e of itp.getField('moleculetype')) {
+                e = e.split('\t')[0]
+                if (!e.startsWith(';')) {
+                    const mol = e.split(' ')[0]
+                    if (Object.keys(avaibleData).includes(forcefield)) {
+                        avaibleData[forcefield].push(mol)
+                    }
+                    else {
+                        avaibleData[forcefield] = [mol]
+                    }
+                }
+            }
+        }
+    }
+
+    //remove duplkiicate 
+    for (let forcefield of Object.keys(avaibleData)) {
+        avaibleData[forcefield] = [...new Set(avaibleData[forcefield])];
+    }
+
+    res.send(avaibleData);
+    console.log("Sending forcefields and residues data")
+})
+
+
+app.get("/api/customdata/:forcefield", (req, res) => {
+    let avaibleData: any = {}
+    let testdico: any = {}
+    console.log(req.params)
+    let ff = req.params.forcefield
+    const pathPolyplyData =
+        glob(PATHDATA + ff + "/*.itp", async function (er, files) {
+            for (let file of files) {
+                let forcefield = file.split('/')[7]
+                const itp = await ItpFile.read(file);
+                for (let e of itp.getField('moleculetype')) {
+                    e = e.split('\t')[0]
+                    if (!e.startsWith(';')) {
+                        const mol = e.split(' ')[0]
+                        if (Object.keys(avaibleData).includes(forcefield)) {
+                            avaibleData[forcefield].push(mol)
+                        }
+                        else {
+                            avaibleData[forcefield] = [mol]
+                        }
+                        if (Object.keys(testdico).includes(forcefield)) {
+                            testdico[forcefield].push(mol)
+                        }
+                        else {
+                            testdico[forcefield] = [mol]
+                        }
+                    }
+                }
+            }
+            res.send(avaibleData);
+        })
 });
 
 app.get("/api/fastaconversion", (req, res) => {
@@ -94,7 +181,7 @@ function checkResult(result: string): boolean {
     }
 }
 
-function parseError(result : string) {
+function parseError(result: string) {
     let processerror = result.split('STOP')[1].split('\n').filter((line: string) => line.startsWith('WARNING - general ')).filter((line: string) => !line.startsWith('WARNING - general - Node '))
 
     //init le dico d'erreur potentiel
@@ -131,6 +218,8 @@ function parseError(result : string) {
 
             //Get forcefield 
             const ff = dataFromClient['polymer']['forcefield']
+            //-f martini_v3.0.0_phospholipids_v1.itp
+            const additionalfile = PATHDATA + ff + "/martini_v3.0.0_phospholipids_v1.itp"
             const jsonInStr = JSON.stringify(dataFromClient.polymer)
             const name = dataFromClient['name']
             const density = dataFromClient['density']
@@ -139,7 +228,8 @@ function parseError(result : string) {
                     "polyplyenv": PATH + "/polyply_1.0/venv/bin/activate",
                     "ff": ff,
                     "density": density,
-                    "name": name
+                    "name": name,
+                    "file": additionalfile
                 },
                 "script": "bin/generate_itp.sh",
                 "inputs": {
@@ -147,30 +237,37 @@ function parseError(result : string) {
                     "martiniForceField": PATH + "/martini_v3.0.0.itp",
                 }
             }
- 
+
             const result = await jobmanagerClient.push(jobOpt1);
 
             console.log(checkResult(result))
             if (checkResult(result)) {
                 console.log("Oups pas de fichier gro")
-                socket.emit("oups", parseError(result) )
+                socket.emit("oups", parseError(result))
             }
             else {
-                socket.emit("itp", true )
-                console.log( "yes on passe au gro")
-                //Then on fait la requete pour le go
 
+                //Then on fait la requete pour le gro
+                console.log("yes on passe au gro")
                 const itp = result.split('STOP')[0]
+                socket.emit("itp", itp)
+
+                //Liste les fichier itp du champs de force 
+                //Tres belle ligne (1h de travail)
+                let bordelitp = glob.sync(PATHDATA + ff + "/*.itp").map(f => { return "#include " + f + "\r" }).join('')
 
                 //super stupid variable pour avoir un retour a la ligne
-                const stupid = '\r'
-                const topfilestr = `#include "${PATH + "/martini_v3.0.0.itp"}"${stupid}#include "polymere.itp" ${stupid}
-                [ system ]${stupid}
-                ; name${stupid}
-                mylovelypolymer${stupid}
-                [ molecules ]${stupid}
-                ; name  number${stupid}
-                ${name} 1 ${stupid}`
+                const stupidline = '\r'
+                const topfilestr =
+                    // bordelitp +
+                    `#include "${PATH + "/martini_v3.0.0.itp"}"${stupidline}
+                    #include "polymere.itp"${stupidline}
+                    [ system ]${stupidline}
+                    ; name${stupidline}
+                    mylovelypolymer${stupidline}
+                    [ molecules ]${stupidline}
+                    ; name  number${stupidline}
+                    ${name} 1 ${stupidline}`
 
                 const jobOpt2: jobOptProxyClient = {
                     "exportVar": {
@@ -186,58 +283,10 @@ function parseError(result : string) {
                     }
                 }
                 const groJob = await jobmanagerClient.push(jobOpt2);
-                socket.emit("gro", groJob )
-                
+                socket.emit("gro", groJob)
+
             }
         })
     }
     )
 })()
-
-
-
-// app.get("/api/rulestest", (req, res) => {
-//     let testdico: any = {}
-//     const pathPolyplyData =
-//         glob(PATH + "/polyply_1.0-master/polyply/data/*/*.+(itp|ff)", async function (er, files) {
-//             for (let file of files) {
-//                 let forcefield = file.split('/')[7]
-//                 //Decouper le document en plusieurs parties avec moleculetype 
-
-//                 const itps = await ItpFile.readMany(file);
-//                 //Plusiuer molecule type dans le fichier !!
-//                 for (const itp of itps) {
-//                     for (let e of itp.getField('moleculetype')) {
-//                         if (!e.startsWith(';')) {
-//                             const mol = e.split(' ')[0]
-//                             let atoms = []
-
-//                             for (let atomline of itp.getField('atoms')) {
-//                                 if (!atomline.startsWith(';')) {
-//                                     //;id  type resnr residu atom cgnr   charge
-//                                     let atomsplit = atomline.split(' ').filter(x => x !== " ").filter(x => x !== "")
-//                                     atoms.push(atomsplit[4])
-//                                 }
-//                             }
-
-//                             if (Object.keys(testdico).includes(forcefield)) {
-//                                 testdico[forcefield][mol] = atoms
-//                             }
-//                             else {
-//                                 testdico[forcefield] = {}
-//                                 testdico[forcefield][mol] = atoms
-//                             }
-//                         }
-//                     }
-//                     for (let e of itp.getField('link')) {
-//                         let resname = e.split(`"`)[1]
-//                         console.log(file, resname)
-//                     }
-//                     // for (let e of itp.getField('bonds')) {
-//                     //     console.log(e)
-//                     // }
-//                 }
-//             }
-//             res.send(testdico);
-//         })
-// });
